@@ -58,13 +58,13 @@ def report_error(error: Exception) -> None:
 
 
 def ensure_session() -> None:
-    if session.is_running():
-        return
-    log.info("starting dictation session")
-    subprocess.run([str(LAUNCHER), "--detached"], check=True)
+    if not session.is_running():
+        log.info("starting dictation session")
+        subprocess.run([str(LAUNCHER), "--detached"], check=True)
     deadline = time.monotonic() + SESSION_BOOT_TIMEOUT
     while time.monotonic() < deadline:
-        if "❯" in session.snapshot().text:
+        if session.is_running() and "❯" in session.snapshot().text:
+            log.info("dictation session is ready")
             return
         time.sleep(0.5)
     raise RuntimeError("dictation session did not finish booting")

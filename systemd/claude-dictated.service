@@ -1,0 +1,15 @@
+[Unit]
+Description=claude-dictate push-to-talk daemon
+Wants=claude-dictate-session.service
+After=claude-dictate-session.service graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStart=%h/.local/bin/claude-dictated
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

@@ -381,7 +381,7 @@
       <!-- daemon.py -> claude-dictate-start -->
       <path class="wire" d="M790,222 L988,222" marker-end="url(#ah)"/>
       <text class="t-lbl" x="908" y="214" text-anchor="middle">ensure_session()</text>
-      <text class="t-lbl" x="908" y="238" text-anchor="middle">--detached, at boot</text>
+      <text class="t-lbl" x="908" y="238" text-anchor="middle">fallback, if no session unit</text>
       <!-- start -> tmux -->
       <path class="wire" d="M1065,254 L1065,294" marker-end="url(#ah)"/>
       <text class="t-lbl" x="1072" y="279">new-session</text>
@@ -657,6 +657,9 @@
 
         <tr class="group"><td colspan="2">Support</td></tr>
         <tr><td>scripts/dictate_once.py</td><td>Runs one dictation from a terminal and prints the transcript.</td></tr>
+        <tr><td>systemd/claude-dictate-session.service</td><td>User unit that owns the tmux session with Claude Code. Clears any leftover session on start and restarts it if Claude exits.</td></tr>
+        <tr><td>systemd/claude-dictated.service</td><td>User unit for the daemon. Wants the session unit, restarts on failure, and is enabled for <code>graphical-session.target</code>. On Hyprland without uwsm it is started from the <code>hyprland.start</code> hook in hypr-user.lua instead.</td></tr>
+        <tr><td>scripts/install-systemd.sh</td><td>Links the bin commands into ~/.local/bin, links both units into systemd and enables the daemon.</td></tr>
         <tr><td>scripts/probe_dictation.py</td><td>Holds push-to-talk for a fixed time and records every distinct pane frame (output in <code>probe-output/</code>).</td></tr>
         <tr><td>tests/</td><td>Unit tests for the Dictator, the transcript parser and the ydotool typer.</td></tr>
       </tbody>

@@ -1,0 +1,13 @@
+[Unit]
+Description=Claude Code voice session for claude-dictate (tmux)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=forking
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+ExecStartPre=-/usr/bin/tmux -L claude-dictate kill-server
+ExecStart=%h/.local/bin/claude-dictate-start --detached
+ExecStop=/usr/bin/tmux -L claude-dictate kill-server
+Restart=always
+RestartSec=2
