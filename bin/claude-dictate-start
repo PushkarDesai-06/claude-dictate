@@ -20,7 +20,8 @@ session_exists() { dtmux has-session -t "$SESSION" 2>/dev/null; }
 
 start_session() {
     mkdir -p "$WORKDIR"
-    dtmux new-session -d -s "$SESSION" -c "$WORKDIR" -x "$COLS" -y "$ROWS" claude
+    dtmux new-session -d -s "$SESSION" -c "$WORKDIR" -x "$COLS" -y "$ROWS" \
+        claude --permission-mode plan --tools ""
     echo "Started tmux session '$SESSION' (socket: $SOCKET) in $WORKDIR"
 }
 
