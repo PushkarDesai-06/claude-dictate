@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly SESSION="claude-dictate"
+readonly SOCKET="claude-dictate"
+readonly PROJECT_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+readonly TMUX_CONF="$PROJECT_DIR/tmux.conf"
+readonly WORKDIR="${CLAUDE_DICTATE_WORKDIR:-$HOME/.local/share/claude-dictate}"
+readonly COLS=120
+readonly ROWS=30
+
+usage() {
+    echo "Usage: $(basename "$0") [--detached]"
+    echo "  --detached   start the tmux session without opening a kitty window"
+}
+
+dtmux() { tmux -L "$SOCKET" -f "$TMUX_CONF" "$@"; }
+
+session_exists() { dtmux has-session -t "$SESSION" 2>/dev/null; }
+
+start_session() {
+    mkdir -p "$WORKDIR"
+    dtmux new-session -d -s "$SESSION" -c "$WORKDIR" -x "$COLS" -y "$ROWS" claude
+    echo "Started tmux session '$SESSION' (socket: $SOCKET) in $WORKDIR"
+}
+
+open_kitty() {
+    setsid -f kitty --class "$SESSION" --title "$SESSION" \
+        -o 'map ctrl+shift+space send_text all \x1b[32;6u' \
+        tmux -L "$SOCKET" attach -t "$SESSION" >/dev/null 2>&1
+}
+
+main() {
+    local attach=1
+    case "${1:-}" in
+        --detached) attach=0 ;;
+        -h|--help) usage; exit 0 ;;
+        "") ;;
+        *) usage; exit 1 ;;
+    esac
+
+    if session_exists; then
+        echo "Session '$SESSION' already running."
+    else
+        start_session
+    fi
+
+    if (( attach )); then
+        open_kitty
+    fi
+}
+
+main "$@"
