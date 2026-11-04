@@ -3,8 +3,8 @@ import subprocess
 from pathlib import Path
 
 SOUNDS_DIR = Path(__file__).resolve().parent.parent / "assets" / "sounds"
-RECORDING_STARTED = SOUNDS_DIR / "recording-started.mp3"
-RECORDING_STOPPED = SOUNDS_DIR / "recording-stopped.mp3"
+RECORDING_STARTED = SOUNDS_DIR / "recording-started.wav"
+RECORDING_STOPPED = SOUNDS_DIR / "recording-stopped.wav"
 
 log = logging.getLogger(__name__)
 
