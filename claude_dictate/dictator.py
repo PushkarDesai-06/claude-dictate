@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable, Iterable
 from typing import Protocol
 
-from claude_dictate import dictation
+from claude_dictate import clipboard, dictation
 from claude_dictate.keyboard import KEY_SPACE, MODIFIER_KEYS, KeyStateUnavailable
 from claude_dictate.typers import TextTyper
 
@@ -25,14 +25,25 @@ class KeyState(Protocol):
     def close(self) -> None: ...
 
 
-class UnsafeToType(RuntimeError):
-    def __init__(self, transcript: str) -> None:
-        super().__init__("Could not confirm that modifier keys were released, so nothing was typed.")
+class TranscriptDeliveryError(RuntimeError):
+    def __init__(self, message: str, transcript: str, clipboard_copied: bool) -> None:
+        super().__init__(message)
         self.transcript = transcript
+        self.clipboard_copied = clipboard_copied
+
+
+class UnsafeToType(TranscriptDeliveryError):
+    def __init__(self, transcript: str, clipboard_copied: bool = False) -> None:
+        super().__init__(
+            "Could not confirm that modifier keys were released, so nothing was typed.",
+            transcript,
+            clipboard_copied,
+        )
 
 
 DictateFn = Callable[[threading.Event], str]
 ErrorFn = Callable[[Exception], None]
+ClipboardFn = Callable[[str], bool]
 KeyStateFactory = Callable[[], KeyState]
 
 
@@ -42,7 +53,8 @@ class Dictator:
     Release comes from whichever happens first: the release command, the hotkey no longer
     being physically held, or the max-hold watchdog. Typing waits until no modifier is
     physically held, so typed keys can never combine with a held modifier into a shortcut.
-    When the key state is unknown, nothing is typed and the transcript goes to on_error.
+    Every nonempty transcript is copied before checking typing safety. When the key
+    state is unknown, nothing is typed and the transcript goes to on_error.
     """
 
     def __init__(
@@ -54,11 +66,13 @@ class Dictator:
         hotkey: int = KEY_SPACE,
         max_hold_seconds: float = MAX_HOLD_SECONDS,
         modifier_release_timeout: float = MODIFIER_RELEASE_TIMEOUT,
+        copy_to_clipboard: ClipboardFn = clipboard.copy_to_clipboard,
     ) -> None:
         self._typer = typer
         self._keyboard_factory = keyboard_factory
         self._dictate = dictate
         self._on_error = on_error
+        self._copy_to_clipboard = copy_to_clipboard
         self._hotkey = hotkey
         self._max_hold_seconds = max_hold_seconds
         self._modifier_release_timeout = modifier_release_timeout
@@ -123,6 +137,27 @@ class Dictator:
             time.sleep(KEY_POLL_SECONDS)
         return True
 
+    def _deliver(self, text: str, keyboard: KeyState) -> None:
+        try:
+            clipboard_copied = self._copy_to_clipboard(text)
+        except Exception:
+            log.exception("could not copy the transcript to the clipboard")
+            clipboard_copied = False
+        if not keyboard.available or not self._wait_for_modifiers_released(keyboard):
+            raise UnsafeToType(text, clipboard_copied)
+        try:
+            self._typer.type_text(text)
+        except Exception as error:
+            raise TranscriptDeliveryError(
+                f"Could not finish typing the transcript: {error}", text, clipboard_copied,
+            ) from error
+        if not clipboard_copied:
+            raise TranscriptDeliveryError(
+                "Typing completed, but the transcript could not be copied to the clipboard.",
+                text,
+                clipboard_copied,
+            )
+
     def _run(self, release: threading.Event) -> None:
         keyboard: KeyState | None = None
         watchdog = threading.Timer(self._max_hold_seconds, release.set)
@@ -136,11 +171,9 @@ class Dictator:
                 log.warning("not every keyboard is readable; relying on the release command alone")
             text = self._dictate(release)
             log.info("transcript: %r", text)
-            if not text:
+            if not text.strip():
                 return
-            if not keyboard.available or not self._wait_for_modifiers_released(keyboard):
-                raise UnsafeToType(text)
-            self._typer.type_text(text)
+            self._deliver(text, keyboard)
         except Exception as error:
             log.exception("dictation failed")
             self._on_error(error)

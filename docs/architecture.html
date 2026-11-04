@@ -560,27 +560,34 @@
           <td class="when">tens of ms</td>
           <td class="where">transcript.py</td>
         </tr>
-        <tr class="phase"><td colspan="4">Type</td></tr>
+        <tr class="phase"><td colspan="4">Copy and type</td></tr>
         <tr>
           <td class="n">10</td>
-          <td>Wait until no Ctrl, Shift, Alt or Super key is physically held. If they stay down, give up with <code>UnsafeToType</code>, copy the transcript to the clipboard with <code>wl-copy</code> and say so in a notification.</td>
+          <td>Skip empty or whitespace-only transcripts. Copy the original Unicode text with <code>wl-copy</code> before any typing checks. The desktop clipboard watcher stores it as the newest history entry. Leave it on the clipboard after typing.</td>
+          <td class="when">2s cap</td>
+          <td class="where">clipboard.copy_to_clipboard</td>
+        </tr>
+        <tr>
+          <td class="n">11</td>
+          <td>Wait until no Ctrl, Shift, Alt or Super key is physically held. If they stay down or their state is unknown, give up with <code>UnsafeToType</code> and report whether the transcript was copied. Error reporting does not copy it again.</td>
           <td class="when">poll 20ms, 10s cap</td>
           <td class="where">Dictator._wait_for_modifiers_released</td>
         </tr>
         <tr>
-          <td class="n">11</td>
+          <td class="n">12</td>
           <td>Normalize to ASCII: straighten curly quotes, turn fancy dashes and ellipses into plain ones, strip accents.</td>
           <td class="when">instant</td>
           <td class="where">to_typeable_ascii</td>
         </tr>
         <tr>
-          <td class="n">12</td>
+          <td class="n">13</td>
           <td>Type it into the focused app with <code>ydotool type --key-hold 2 --key-delay 2</code>.</td>
           <td class="when">2ms hold, 2ms delay</td>
           <td class="where">YdotoolTyper.type_text</td>
         </tr>
       </tbody>
     </table>
+    <p>Clipboard failure does not prevent safe typing. Typing failures carry the original transcript and clipboard result, since some text may already have been typed. Notifications include the transcript if copying failed, including when typing completed successfully.</p>
     <p class="total"><strong>About 2.0s from release to text:</strong> 0.3s tail + ~0.6s for the last words + 1.0s stability window + read, clear and type.</p>
   </div>
 </section>
@@ -643,7 +650,7 @@
         <tr><td>claude_dictate/ctl.py</td><td>CLI client: sends one command and prints the reply.</td></tr>
         <tr><td>claude_dictate/ipc.py</td><td>Socket path and the line-based <code>send_command</code> protocol.</td></tr>
         <tr><td>claude_dictate/daemon.py</td><td>Makes sure the session is up, serves the socket, wires the Dictator to YdotoolTyper and PhysicalKeyboard, reports errors with notify-send.</td></tr>
-        <tr><td>claude_dictate/dictator.py</td><td>Turns press and release into one dictation at a time; watches the hotkey, waits for modifiers, then types.</td></tr>
+        <tr><td>claude_dictate/dictator.py</td><td>Turns press and release into one dictation at a time; watches the hotkey, copies nonempty transcripts, waits for modifiers, then types.</td></tr>
         <tr><td>claude_dictate/keyboard.py</td><td>Finds keyboards in <code>/proc/bus/input/devices</code> and reads which keys are held with <code>EVIOCGKEY</code>, without consuming events.</td></tr>
 
         <tr class="group"><td colspan="2">Claude Code engine</td></tr>
@@ -652,6 +659,7 @@
         <tr><td>claude_dictate/session.py</td><td>The only module that calls tmux: <code>send-keys -H</code>, <code>capture-pane -p -e</code>, cursor and pane size.</td></tr>
 
         <tr class="group"><td colspan="2">Output</td></tr>
+        <tr><td>claude_dictate/clipboard.py</td><td>Copies original text with <code>wl-copy</code>, with a bounded timeout and a success result. Clipboard history is maintained by the desktop watcher.</td></tr>
         <tr><td>claude_dictate/typers/base.py</td><td><code>TextTyper</code>: the interface for delivering text to the focused app.</td></tr>
         <tr><td>claude_dictate/typers/ydotool.py</td><td><code>YdotoolTyper</code> and <code>to_typeable_ascii</code>.</td></tr>
 

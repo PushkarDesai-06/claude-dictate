@@ -8,8 +8,8 @@ import time
 from functools import partial
 from pathlib import Path
 
-from claude_dictate import dictation, session, sounds
-from claude_dictate.dictator import Dictator, UnsafeToType
+from claude_dictate import clipboard, dictation, session, sounds
+from claude_dictate.dictator import Dictator, TranscriptDeliveryError
 from claude_dictate.ipc import COMMANDS, SOCKET_PATH, send_command
 from claude_dictate.keyboard import PhysicalKeyboard
 from claude_dictate.typers import YdotoolTyper
@@ -31,27 +31,10 @@ def notify(message: str) -> None:
         log.warning("could not show notification: %s", message)
 
 
-def copy_to_clipboard(text: str) -> bool:
-    try:
-        subprocess.run(
-            ["wl-copy"],
-            input=text,
-            text=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True,
-            timeout=2,
-        )
-        return True
-    except (OSError, subprocess.SubprocessError):
-        log.warning("could not copy the transcript to the clipboard")
-        return False
-
-
 def report_error(error: Exception) -> None:
-    if not isinstance(error, UnsafeToType):
+    if not isinstance(error, TranscriptDeliveryError):
         notify(str(error))
-    elif copy_to_clipboard(error.transcript):
+    elif error.clipboard_copied:
         notify(f"{error} The transcript is on your clipboard.")
     else:
         notify(f"{error} Transcript: {error.transcript}")
@@ -111,7 +94,10 @@ def serve(socket_path: Path = SOCKET_PATH) -> None:
         on_recording_started=lambda: sounds.play(sounds.RECORDING_STARTED),
         on_recording_stopped=lambda: sounds.play(sounds.RECORDING_STOPPED),
     )
-    dictator = Dictator(YdotoolTyper(), PhysicalKeyboard, dictate_with_cues, on_error=report_error)
+    dictator = Dictator(
+        YdotoolTyper(), PhysicalKeyboard, dictate_with_cues,
+        on_error=report_error, copy_to_clipboard=clipboard.copy_to_clipboard,
+    )
     server = bind_socket(socket_path)
     log.info("listening on %s", socket_path)
     try:

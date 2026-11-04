@@ -2,8 +2,9 @@ import threading
 import time
 import unittest
 from collections.abc import Iterable
+from unittest import mock
 
-from claude_dictate.dictator import Dictator, UnsafeToType
+from claude_dictate.dictator import Dictator, TranscriptDeliveryError, UnsafeToType
 from claude_dictate.keyboard import KEY_SPACE, KeyStateUnavailable
 from claude_dictate.typers import TextTyper
 
@@ -46,9 +47,11 @@ class DictatorTest(unittest.TestCase):
         self.typer = RecordingTyper()
         self.errors: list[Exception] = []
         self.keyboard = FakeKeyboard(held={KEY_SPACE})
+        self.copy_to_clipboard = mock.Mock(return_value=True)
 
     def make(self, dictate, **options) -> Dictator:
         options.setdefault("max_hold_seconds", 5.0)
+        options.setdefault("copy_to_clipboard", self.copy_to_clipboard)
         return Dictator(self.typer, lambda: self.keyboard, dictate, self.errors.append, **options)
 
     def test_press_then_release_types_the_transcript(self):
@@ -58,6 +61,8 @@ class DictatorTest(unittest.TestCase):
         self.assertEqual(dictator.release(), "released")
         dictator.wait_until_idle(2)
         self.assertEqual(self.typer.typed, ["hello world"])
+        self.copy_to_clipboard.assert_called_once_with("hello world")
+        self.assertEqual(self.errors, [])
         self.assertEqual(dictator.status(), "idle")
         self.assertTrue(self.keyboard.closed)
 
@@ -96,6 +101,103 @@ class DictatorTest(unittest.TestCase):
         dictator.wait_until_idle(2)
         self.assertEqual(self.typer.typed, [])
 
+    def test_empty_or_whitespace_transcript_leaves_clipboard_and_typing_unchanged(self):
+        for text in ("", " \t\n"):
+            with self.subTest(text=text):
+                dictator = self.make(dictate_returning(text))
+                dictator.press()
+                dictator.release()
+                dictator.wait_until_idle(2)
+                self.copy_to_clipboard.assert_not_called()
+                self.assertEqual(self.typer.typed, [])
+                self.assertEqual(self.errors, [])
+
+    def test_original_text_is_copied_before_modifier_checks_and_typing(self):
+        text = "  café 你好\nnext line\n"
+        dictator = self.make(dictate_returning(text))
+        events = mock.Mock()
+        events.attach_mock(self.copy_to_clipboard, "copy")
+        with (
+            mock.patch.object(dictator, "_wait_for_modifiers_released", return_value=True) as safety,
+            mock.patch.object(self.typer, "type_text") as type_text,
+        ):
+            events.attach_mock(safety, "safety")
+            events.attach_mock(type_text, "type")
+            dictator.press()
+            dictator.release()
+            dictator.wait_until_idle(2)
+        self.assertEqual(events.mock_calls, [
+            mock.call.copy(text), mock.call.safety(self.keyboard), mock.call.type(text),
+        ])
+
+    def test_failed_copy_still_types_and_reports_the_transcript(self):
+        self.copy_to_clipboard.return_value = False
+        dictator = self.make(dictate_returning("still typed"))
+        dictator.press()
+        dictator.release()
+        dictator.wait_until_idle(2)
+        self.copy_to_clipboard.assert_called_once_with("still typed")
+        self.assertEqual(self.typer.typed, ["still typed"])
+        self.assertEqual(len(self.errors), 1)
+        self.assertIsInstance(self.errors[0], TranscriptDeliveryError)
+        self.assertFalse(self.errors[0].clipboard_copied)
+        self.assertEqual(self.errors[0].transcript, "still typed")
+        self.assertIn("Typing completed", str(self.errors[0]))
+        self.assertEqual(dictator.status(), "idle")
+
+    def test_clipboard_writer_exception_does_not_prevent_typing(self):
+        self.copy_to_clipboard.side_effect = OSError("clipboard unavailable")
+        dictator = self.make(dictate_returning("still typed"))
+        dictator.press()
+        dictator.release()
+        dictator.wait_until_idle(2)
+        self.assertEqual(self.typer.typed, ["still typed"])
+        self.assertEqual(len(self.errors), 1)
+        self.assertFalse(self.errors[0].clipboard_copied)
+
+    def test_typing_failure_retains_transcript_and_actual_clipboard_result(self):
+        for copied in (True, False):
+            with self.subTest(copied=copied):
+                self.errors.clear()
+                self.copy_to_clipboard.reset_mock()
+                self.copy_to_clipboard.return_value = copied
+                error = OSError("ydotool unavailable")
+                dictator = self.make(dictate_returning("preserved"))
+                with mock.patch.object(self.typer, "type_text", side_effect=error):
+                    dictator.press()
+                    dictator.release()
+                    dictator.wait_until_idle(2)
+                self.copy_to_clipboard.assert_called_once_with("preserved")
+                self.assertEqual(len(self.errors), 1)
+                self.assertIsInstance(self.errors[0], TranscriptDeliveryError)
+                self.assertEqual(self.errors[0].transcript, "preserved")
+                self.assertIs(self.errors[0].clipboard_copied, copied)
+                self.assertIs(self.errors[0].__cause__, error)
+                self.assertEqual(dictator.status(), "idle")
+
+    def test_repeated_transcripts_are_copied_each_time(self):
+        dictator = self.make(dictate_returning("repeat"))
+        for _ in range(2):
+            dictator.press()
+            dictator.release()
+            dictator.wait_until_idle(2)
+        self.assertEqual(self.copy_to_clipboard.call_args_list, [
+            mock.call("repeat"), mock.call("repeat"),
+        ])
+
+    def test_failed_copy_and_blocked_typing_report_one_error(self):
+        self.keyboard = FakeKeyboard(available=False)
+        self.copy_to_clipboard.return_value = False
+        dictator = self.make(dictate_returning("kept in notification"))
+        dictator.press()
+        dictator.release()
+        dictator.wait_until_idle(2)
+        self.copy_to_clipboard.assert_called_once_with("kept in notification")
+        self.assertEqual(self.typer.typed, [])
+        self.assertEqual(len(self.errors), 1)
+        self.assertIsInstance(self.errors[0], UnsafeToType)
+        self.assertFalse(self.errors[0].clipboard_copied)
+
     def test_watchdog_releases_a_stuck_hold(self):
         dictator = self.make(dictate_returning("timed out"), max_hold_seconds=0.1)
         dictator.press()
@@ -110,6 +212,7 @@ class DictatorTest(unittest.TestCase):
         dictator.press()
         dictator.wait_until_idle(2)
         self.assertEqual([str(e) for e in self.errors], ["voice is off"])
+        self.copy_to_clipboard.assert_not_called()
         self.assertEqual(dictator.status(), "idle")
         self.assertEqual(dictator.press(), "recording")
 
@@ -140,6 +243,8 @@ class DictatorTest(unittest.TestCase):
         self.assertEqual(self.typer.typed, [])
         self.assertIsInstance(self.errors[0], UnsafeToType)
         self.assertEqual(self.errors[0].transcript, "kept safe")
+        self.copy_to_clipboard.assert_called_once_with("kept safe")
+        self.assertTrue(self.errors[0].clipboard_copied)
 
     def test_unreadable_keys_during_hold_do_not_release_early(self):
         dictator = self.make(dictate_returning("still recording"))
@@ -160,6 +265,8 @@ class DictatorTest(unittest.TestCase):
         self.assertEqual(self.typer.typed, [])
         self.assertIsInstance(self.errors[0], UnsafeToType)
         self.assertEqual(self.errors[0].transcript, "not typed blind")
+        self.copy_to_clipboard.assert_called_once_with("not typed blind")
+        self.assertTrue(self.errors[0].clipboard_copied)
 
     def test_keyboard_discovery_failure_reports_error_and_frees_the_dictator(self):
         def broken_factory():
@@ -185,6 +292,8 @@ class DictatorTest(unittest.TestCase):
         self.assertEqual(self.typer.typed, [])
         self.assertIsInstance(self.errors[0], UnsafeToType)
         self.assertEqual(self.errors[0].transcript, "preserved, not typed")
+        self.copy_to_clipboard.assert_called_once_with("preserved, not typed")
+        self.assertTrue(self.errors[0].clipboard_copied)
 
     def test_unavailable_keyboard_refuses_typing_without_waiting_for_timeout(self):
         self.keyboard = FakeKeyboard(available=False)
