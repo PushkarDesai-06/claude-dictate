@@ -25,12 +25,9 @@ class KeyState(Protocol):
     def close(self) -> None: ...
 
 
-class ModifiersStillHeld(RuntimeError):
+class UnsafeToType(RuntimeError):
     def __init__(self, transcript: str) -> None:
-        super().__init__(
-            "Could not confirm that modifier keys were released, so nothing was typed. "
-            f"Transcript: {transcript}"
-        )
+        super().__init__("Could not confirm that modifier keys were released, so nothing was typed.")
         self.transcript = transcript
 
 
@@ -45,6 +42,7 @@ class Dictator:
     Release comes from whichever happens first: the release command, the hotkey no longer
     being physically held, or the max-hold watchdog. Typing waits until no modifier is
     physically held, so typed keys can never combine with a held modifier into a shortcut.
+    When the key state is unknown, nothing is typed and the transcript goes to on_error.
     """
 
     def __init__(
@@ -140,8 +138,8 @@ class Dictator:
             log.info("transcript: %r", text)
             if not text:
                 return
-            if keyboard.available and not self._wait_for_modifiers_released(keyboard):
-                raise ModifiersStillHeld(text)
+            if not keyboard.available or not self._wait_for_modifiers_released(keyboard):
+                raise UnsafeToType(text)
             self._typer.type_text(text)
         except Exception as error:
             log.exception("dictation failed")

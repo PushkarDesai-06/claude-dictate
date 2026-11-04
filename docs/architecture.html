@@ -563,7 +563,7 @@
         <tr class="phase"><td colspan="4">Type</td></tr>
         <tr>
           <td class="n">10</td>
-          <td>Wait until no Ctrl, Shift, Alt or Super key is physically held. If they stay down, give up with <code>ModifiersStillHeld</code> and show the transcript in a notification.</td>
+          <td>Wait until no Ctrl, Shift, Alt or Super key is physically held. If they stay down, give up with <code>UnsafeToType</code>, copy the transcript to the clipboard with <code>wl-copy</code> and say so in a notification.</td>
           <td class="when">poll 20ms, 10s cap</td>
           <td class="where">Dictator._wait_for_modifiers_released</td>
         </tr>

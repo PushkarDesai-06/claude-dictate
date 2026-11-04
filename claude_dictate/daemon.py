@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from claude_dictate import session
-from claude_dictate.dictator import Dictator
+from claude_dictate.dictator import Dictator, UnsafeToType
 from claude_dictate.ipc import COMMANDS, SOCKET_PATH, send_command
 from claude_dictate.keyboard import PhysicalKeyboard
 from claude_dictate.typers import YdotoolTyper
@@ -28,6 +28,32 @@ def notify(message: str) -> None:
         )
     except (OSError, subprocess.TimeoutExpired):
         log.warning("could not show notification: %s", message)
+
+
+def copy_to_clipboard(text: str) -> bool:
+    try:
+        subprocess.run(
+            ["wl-copy"],
+            input=text,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+            timeout=2,
+        )
+        return True
+    except (OSError, subprocess.SubprocessError):
+        log.warning("could not copy the transcript to the clipboard")
+        return False
+
+
+def report_error(error: Exception) -> None:
+    if not isinstance(error, UnsafeToType):
+        notify(str(error))
+    elif copy_to_clipboard(error.transcript):
+        notify(f"{error} The transcript is on your clipboard.")
+    else:
+        notify(f"{error} Transcript: {error.transcript}")
 
 
 def ensure_session() -> None:
@@ -79,7 +105,7 @@ def handle(connection: socket.socket, dictator: Dictator) -> None:
 
 
 def serve(socket_path: Path = SOCKET_PATH) -> None:
-    dictator = Dictator(YdotoolTyper(), PhysicalKeyboard, on_error=lambda error: notify(str(error)))
+    dictator = Dictator(YdotoolTyper(), PhysicalKeyboard, on_error=report_error)
     server = bind_socket(socket_path)
     log.info("listening on %s", socket_path)
     try:

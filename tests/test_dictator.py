@@ -3,7 +3,7 @@ import time
 import unittest
 from collections.abc import Iterable
 
-from claude_dictate.dictator import Dictator, ModifiersStillHeld
+from claude_dictate.dictator import Dictator, UnsafeToType
 from claude_dictate.keyboard import KEY_SPACE, KeyStateUnavailable
 from claude_dictate.typers import TextTyper
 
@@ -138,7 +138,7 @@ class DictatorTest(unittest.TestCase):
         dictator.press()
         dictator.wait_until_idle(2)
         self.assertEqual(self.typer.typed, [])
-        self.assertIsInstance(self.errors[0], ModifiersStillHeld)
+        self.assertIsInstance(self.errors[0], UnsafeToType)
         self.assertEqual(self.errors[0].transcript, "kept safe")
 
     def test_unreadable_keys_during_hold_do_not_release_early(self):
@@ -158,7 +158,7 @@ class DictatorTest(unittest.TestCase):
         dictator.release()
         dictator.wait_until_idle(2)
         self.assertEqual(self.typer.typed, [])
-        self.assertIsInstance(self.errors[0], ModifiersStillHeld)
+        self.assertIsInstance(self.errors[0], UnsafeToType)
         self.assertEqual(self.errors[0].transcript, "not typed blind")
 
     def test_keyboard_discovery_failure_reports_error_and_frees_the_dictator(self):
@@ -174,15 +174,28 @@ class DictatorTest(unittest.TestCase):
         dictator.release()
         dictator.wait_until_idle(2)
 
-    def test_without_readable_keyboards_the_release_command_still_works(self):
+    def test_without_readable_keyboards_release_works_but_nothing_is_typed(self):
         self.keyboard = FakeKeyboard(available=False)
-        dictator = self.make(dictate_returning("fallback"))
+        dictator = self.make(dictate_returning("preserved, not typed"))
         dictator.press()
         time.sleep(0.1)
         self.assertEqual(dictator.status(), "recording")
         dictator.release()
         dictator.wait_until_idle(2)
-        self.assertEqual(self.typer.typed, ["fallback"])
+        self.assertEqual(self.typer.typed, [])
+        self.assertIsInstance(self.errors[0], UnsafeToType)
+        self.assertEqual(self.errors[0].transcript, "preserved, not typed")
+
+    def test_unavailable_keyboard_refuses_typing_without_waiting_for_timeout(self):
+        self.keyboard = FakeKeyboard(available=False)
+        dictator = self.make(dictate_returning("fast refusal"), modifier_release_timeout=5.0)
+        dictator.press()
+        dictator.release()
+        started = time.monotonic()
+        dictator.wait_until_idle(2)
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertEqual(self.typer.typed, [])
+        self.assertIsInstance(self.errors[0], UnsafeToType)
 
 
 if __name__ == "__main__":
