@@ -10,6 +10,7 @@ from pathlib import Path
 from claude_dictate import session
 from claude_dictate.dictator import Dictator
 from claude_dictate.ipc import COMMANDS, SOCKET_PATH, send_command
+from claude_dictate.keyboard import PhysicalKeyboard
 from claude_dictate.typers import YdotoolTyper
 
 LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "claude-dictate-start"
@@ -78,7 +79,7 @@ def handle(connection: socket.socket, dictator: Dictator) -> None:
 
 
 def serve(socket_path: Path = SOCKET_PATH) -> None:
-    dictator = Dictator(YdotoolTyper(), on_error=lambda error: notify(str(error)))
+    dictator = Dictator(YdotoolTyper(), PhysicalKeyboard, on_error=lambda error: notify(str(error)))
     server = bind_socket(socket_path)
     log.info("listening on %s", socket_path)
     try:

@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-dictate architecture</title>
+<style>
+  :root {
+    --bg: #f6f6f3;
+    --surface: #ffffff;
+    --text: #1c1f24;
+    --muted: #5b626d;
+    --faint: #8a909a;
+    --line: #c8ccd3;
+    --frame: #d9dce1;
+    --arrow: #4a515c;
+    --code-bg: #eceee9;
+    --accent: #2c5bc8;
+    --accent-soft: #e7edfa;
+    --warm: #a8590c;
+    --warm-soft: #faefe0;
+    --ext: #4b5260;
+    --ext-soft: #eff0f2;
+    --screen-bg: #1e2127;
+    --screen-text: #e3e5e8;
+    --screen-dim: #7b818b;
+    --ok: #2f7d4f;
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Code", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161a;
+      --surface: #1c1f25;
+      --text: #e5e7ea;
+      --muted: #a0a7b2;
+      --faint: #767d88;
+      --line: #3a3f48;
+      --frame: #2e333b;
+      --arrow: #aeb5bf;
+      --code-bg: #262a31;
+      --accent: #84a6f4;
+      --accent-soft: #1d2740;
+      --warm: #e5a45c;
+      --warm-soft: #33281a;
+      --ext: #b7bdc6;
+      --ext-soft: #23262c;
+      --screen-bg: #0d0f12;
+      --screen-text: #e3e5e8;
+      --screen-dim: #6c727c;
+      --ok: #6cc08f;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161a;
+    --surface: #1c1f25;
+    --text: #e5e7ea;
+    --muted: #a0a7b2;
+    --faint: #767d88;
+    --line: #3a3f48;
+    --frame: #2e333b;
+    --arrow: #aeb5bf;
+    --code-bg: #262a31;
+    --accent: #84a6f4;
+    --accent-soft: #1d2740;
+    --warm: #e5a45c;
+    --warm-soft: #33281a;
+    --ext: #b7bdc6;
+    --ext-soft: #23262c;
+    --screen-bg: #0d0f12;
+    --screen-text: #e3e5e8;
+    --screen-dim: #6c727c;
+    --ok: #6cc08f;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 var(--font);
+  }
+  main {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 40px 24px 64px;
+  }
+  header { margin-bottom: 32px; max-width: 820px; }
+  h1 { font-size: 26px; line-height: 1.25; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 19px; margin: 0 0 6px; letter-spacing: -0.005em; }
+  .lede { color: var(--muted); margin: 0; }
+  section { margin-top: 44px; }
+  .section-intro { color: var(--muted); margin: 0 0 16px; max-width: 820px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--frame);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .diagram { overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; height: auto; }
+  #components svg { min-width: 1080px; }
+  #timeline svg { min-width: 1000px; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 8px 22px;
+    margin-top: 12px; font-size: 13px; color: var(--muted);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .sw { width: 18px; height: 12px; border-radius: 3px; border: 1.5px solid; display: inline-block; }
+  .sw.ours { background: var(--accent-soft); border-color: var(--accent); }
+  .sw.claude { background: var(--warm-soft); border-color: var(--warm); }
+  .sw.ext { background: var(--ext-soft); border-color: var(--ext); }
+  .sw.dash { background: transparent; border: 1.5px dashed var(--muted); }
+
+  /* SVG styling via tokens */
+  svg text { font-family: var(--font); fill: var(--text); }
+  svg .t-title { font-size: 14px; font-weight: 600; }
+  svg .t-sub { font-size: 11.5px; fill: var(--muted); }
+  svg .t-code { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+  svg .t-lbl { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+  svg .t-frame { font-size: 12px; font-weight: 600; fill: var(--muted); letter-spacing: 0.02em; }
+  svg .t-frame-sub { font-family: var(--mono); font-size: 10.5px; fill: var(--faint); }
+  svg .box-ours { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  svg .box-claude { fill: var(--warm-soft); stroke: var(--warm); stroke-width: 1.5; }
+  svg .box-ext { fill: var(--ext-soft); stroke: var(--ext); stroke-width: 1.5; }
+  svg .dashed { stroke-dasharray: 5 4; }
+  svg .frame { fill: none; stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 2 4; }
+  svg .frame-solid { fill: none; stroke: var(--warm); stroke-width: 1.2; stroke-dasharray: 6 4; opacity: 0.8; }
+  svg .wire { fill: none; stroke: var(--arrow); stroke-width: 1.5; }
+  svg .wire-dash { fill: none; stroke: var(--arrow); stroke-width: 1.5; stroke-dasharray: 5 4; }
+  svg .head { fill: var(--arrow); }
+  svg .screen { fill: var(--screen-bg); stroke: none; }
+  svg .scr { font-family: var(--mono); font-size: 12px; fill: var(--screen-text); }
+  svg .scr-dim { font-family: var(--mono); font-size: 12px; fill: var(--screen-dim); }
+  svg .scr-meter { font-family: var(--mono); font-size: 12px; fill: var(--warm); }
+
+  /* timeline */
+  svg .lane-lbl { font-size: 12px; font-weight: 600; fill: var(--muted); }
+  svg .bar-ours { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+  svg .bar-claude { fill: var(--warm-soft); stroke: var(--warm); stroke-width: 1.2; }
+  svg .bar-ext { fill: var(--ext-soft); stroke: var(--ext); stroke-width: 1.2; }
+  svg .bar-ok { fill: var(--surface); stroke: var(--ok); stroke-width: 1.2; }
+  svg .bar-txt { font-size: 11.5px; fill: var(--text); }
+  svg .bar-code { font-family: var(--mono); font-size: 11px; fill: var(--text); }
+  svg .axis { stroke: var(--line); stroke-width: 1.2; }
+  svg .tick { stroke: var(--muted); stroke-width: 1.2; }
+  svg .tick-lbl { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+  svg .guide { stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 3 3; }
+  svg .zig { fill: none; stroke: var(--faint); stroke-width: 1.2; }
+
+  /* step table */
+  .steps { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .steps th, .steps td { text-align: left; vertical-align: top; padding: 9px 10px; border-top: 1px solid var(--frame); }
+  .steps thead th { border-top: none; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+  .steps td.n { color: var(--faint); font-family: var(--mono); font-size: 12px; width: 32px; }
+  .steps td.when { white-space: nowrap; font-family: var(--mono); font-size: 12.5px; color: var(--accent); width: 150px; }
+  .steps td.where { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: nowrap; width: 190px; }
+  .steps tr.phase td { background: var(--ext-soft); font-size: 12px; font-weight: 600; color: var(--muted); padding: 6px 10px; letter-spacing: 0.03em; }
+  .table-wrap { overflow-x: auto; }
+  .total {
+    margin-top: 14px; font-size: 14px; color: var(--muted);
+  }
+  .total strong { color: var(--text); }
+
+  /* findings */
+  .findings { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+  .finding { background: var(--surface); border: 1px solid var(--frame); border-radius: 10px; padding: 14px 16px; }
+  .finding h3 { font-size: 14.5px; margin: 0 0 6px; }
+  .finding p { margin: 0; font-size: 14px; color: var(--muted); }
+  .finding p code { color: var(--text); }
+
+  /* file map */
+  .files { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .files td { padding: 7px 10px; border-top: 1px solid var(--frame); vertical-align: top; }
+  .files tr:first-child td { border-top: none; }
+  .files td:first-child { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; width: 300px; }
+  .files tr.group td { font-family: var(--font); font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; padding-top: 16px; border-top: none; }
+
+  footer { margin-top: 48px; font-size: 12.5px; color: var(--faint); }
+
+  @media (max-width: 640px) {
+    main { padding: 28px 16px 48px; }
+    h1 { font-size: 22px; }
+    .findings { grid-template-columns: 1fr; }
+    .files td:first-child { white-space: normal; width: auto; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>claude-dictate architecture</h1>
+  <p class="lede">
+    Push-to-talk dictation for Hyprland on Wayland. A real Claude Code CLI runs hidden in its own tmux server with
+    <code>/voice</code> on and acts as the speech-to-text engine. Python code holds Claude's push-to-talk key by injecting
+    keystrokes into tmux, scrapes the transcript off the rendered screen, and types it into whatever window has focus with ydotool.
+  </p>
+</header>
+
+<!-- ============================================================ -->
+<section id="components">
+  <h2>Components</h2>
+  <p class="section-intro">
+    Hold <code>Super+Space</code> anywhere. Hyprland calls a tiny client, the client talks to a long-running daemon over a
+    unix socket, and the daemon drives Claude Code through tmux. Arrows point in the direction of the call or the data.
+  </p>
+
+  <div class="panel diagram">
+    <svg viewBox="0 0 1320 780" role="img" aria-labelledby="comp-title comp-desc">
+      <title id="comp-title">Component diagram</title>
+      <desc id="comp-desc">Hyprland calls claude-dictate-ctl, which sends a command over a unix socket to the claude-dictated daemon. The daemon's Dictator runs dictate(), which drives Claude Code inside tmux through session.py and reads the screen back through transcript.py. keyboard.py reads physical key state from /dev/input. The transcript is typed through the TextTyper interface, implemented by YdotoolTyper, which talks to ydotoold and into the focused app.</desc>
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path class="head" d="M0,0 L10,5 L0,10 z"/>
+        </marker>
+      </defs>
+
+      <!-- frames -->
+      <rect class="frame" x="16" y="30" width="228" height="742" rx="12"/>
+      <text class="t-frame" x="30" y="50">DESKTOP / KERNEL</text>
+
+      <rect class="frame" x="280" y="160" width="550" height="500" rx="12"/>
+      <text class="t-frame" x="294" y="180">claude-dictated (Python daemon)</text>
+
+      <rect class="frame-solid" x="980" y="296" width="320" height="364" rx="12"/>
+      <text class="t-frame" x="994" y="316">tmux server, socket -L claude-dictate</text>
+      <text class="t-frame-sub" x="994" y="332">session claude-dictate:0, pane 120x30</text>
+
+      <!-- LEFT column -->
+      <g>
+        <rect class="box-ext" x="30" y="60" width="200" height="78" rx="8"/>
+        <text class="t-title" x="44" y="83">Hyprland</text>
+        <text class="t-code" x="44" y="103">SUPER + Space</text>
+        <text class="t-sub" x="44" y="121">on press; release bind as backup</text>
+      </g>
+      <g>
+        <rect class="box-ext" x="30" y="190" width="200" height="64" rx="8"/>
+        <text class="t-title" x="44" y="213">Physical keyboard</text>
+        <text class="t-code" x="44" y="235">/dev/input/event*</text>
+      </g>
+      <g>
+        <rect class="box-ext" x="30" y="570" width="200" height="64" rx="8"/>
+        <text class="t-title" x="44" y="593">ydotoold</text>
+        <text class="t-sub" x="44" y="614">virtual uinput keyboard</text>
+      </g>
+      <g>
+        <rect class="box-ext" x="30" y="700" width="200" height="60" rx="8"/>
+        <text class="t-title" x="44" y="723">Focused app</text>
+        <text class="t-sub" x="44" y="743">receives the typed text</text>
+      </g>
+
+      <!-- TOP row: ctl and socket (outside the daemon) -->
+      <g>
+        <rect class="box-ours" x="300" y="60" width="210" height="78" rx="8"/>
+        <text class="t-title" x="314" y="83">claude-dictate-ctl</text>
+        <text class="t-code" x="314" y="103">press | release | status</text>
+        <text class="t-sub" x="314" y="121">short-lived client, ctl.py</text>
+      </g>
+      <g>
+        <rect class="box-ext" x="580" y="60" width="210" height="78" rx="8"/>
+        <text class="t-title" x="594" y="83">Unix socket</text>
+        <text class="t-code" x="594" y="103">$XDG_RUNTIME_DIR/</text>
+        <text class="t-code" x="594" y="119">claude-dictate.sock</text>
+      </g>
+
+      <!-- MIDDLE: M1 column -->
+      <g>
+        <rect class="box-ours" x="300" y="190" width="210" height="64" rx="8"/>
+        <text class="t-title" x="314" y="213">keyboard.py</text>
+        <text class="t-sub" x="314" y="234">PhysicalKeyboard.any_held()</text>
+      </g>
+      <g>
+        <rect class="box-ours" x="300" y="310" width="210" height="84" rx="8"/>
+        <text class="t-title" x="314" y="333">Dictator</text>
+        <text class="t-sub" x="314" y="352">one dictation at a time</text>
+        <text class="t-sub" x="314" y="369">release: command, Space up,</text>
+        <text class="t-sub" x="314" y="385">or 60s watchdog</text>
+      </g>
+      <g>
+        <rect class="box-ours dashed" x="300" y="440" width="210" height="64" rx="8"/>
+        <text class="t-title" x="314" y="463">TextTyper</text>
+        <text class="t-sub" x="314" y="484">interface: type_text(text)</text>
+      </g>
+      <g>
+        <rect class="box-ours" x="300" y="570" width="210" height="64" rx="8"/>
+        <text class="t-title" x="314" y="593">YdotoolTyper</text>
+        <text class="t-sub" x="314" y="613">ASCII only, 2ms hold / 2ms delay</text>
+      </g>
+
+      <!-- MIDDLE: M2 column -->
+      <g>
+        <rect class="box-ours" x="580" y="190" width="210" height="78" rx="8"/>
+        <text class="t-title" x="594" y="213">daemon.py</text>
+        <text class="t-sub" x="594" y="232">accept loop, one line per call</text>
+        <text class="t-sub" x="594" y="250">errors go to notify-send</text>
+      </g>
+      <g>
+        <rect class="box-ours" x="580" y="310" width="210" height="84" rx="8"/>
+        <text class="t-title" x="594" y="333">dictate()</text>
+        <text class="t-sub" x="594" y="352">dictation.py</text>
+        <text class="t-sub" x="594" y="369">clear, hold PTT, wait for</text>
+        <text class="t-sub" x="594" y="385">release, wait for final text</text>
+      </g>
+      <g>
+        <rect class="box-ours" x="580" y="440" width="148" height="70" rx="8"/>
+        <text class="t-title" x="594" y="463">transcript.py</text>
+        <text class="t-sub" x="594" y="482">parses the input box</text>
+        <text class="t-sub" x="594" y="498">text + recording flag</text>
+      </g>
+      <g>
+        <rect class="box-ours" x="580" y="570" width="210" height="64" rx="8"/>
+        <text class="t-title" x="594" y="593">session.py</text>
+        <text class="t-sub" x="594" y="613">only module that runs tmux</text>
+      </g>
+
+      <!-- RIGHT column -->
+      <g>
+        <rect class="box-ext" x="990" y="190" width="150" height="64" rx="8"/>
+        <text class="t-title" x="1000" y="213" style="font-size:13px">claude-dictate-start</text>
+        <text class="t-sub" x="1002" y="234">bash launcher</text>
+      </g>
+      <g>
+        <rect class="box-ext dashed" x="1150" y="190" width="150" height="64" rx="8"/>
+        <text class="t-title" x="1162" y="213">kitty (optional)</text>
+        <text class="t-sub" x="1162" y="234">window for watching</text>
+      </g>
+      <g>
+        <rect class="box-claude" x="1000" y="350" width="280" height="292" rx="8"/>
+        <text class="t-title" x="1014" y="374">Claude Code</text>
+        <text class="t-code" x="1014" y="394">claude --permission-mode plan</text>
+        <text class="t-code" x="1061" y="410">--tools ""</text>
+        <text class="t-sub" x="1014" y="430">/voice on, push-to-talk bound to</text>
+        <text class="t-code" x="1014" y="446">ctrl+shift+space</text>
+
+        <rect class="screen" x="1014" y="460" width="252" height="92" rx="5"/>
+        <text class="scr-dim" x="1024" y="482">────────────────────────────</text>
+        <text class="scr" x="1024" y="508">❯ hello from the mic <tspan class="scr-meter">▃▅▇</tspan></text>
+        <text class="scr-dim" x="1024" y="534">────────────────────────────</text>
+
+        <text class="t-sub" x="1014" y="574">Input box sits between two rules.</text>
+        <text class="t-sub" x="1014" y="592">Meter glyph at the end means recording.</text>
+        <text class="t-sub" x="1014" y="610">Empty box shows a dim (SGR 2)</text>
+        <text class="t-sub" x="1014" y="627">placeholder.</text>
+      </g>
+
+      <!-- ARROWS -->
+      <!-- Hyprland -> ctl -->
+      <path class="wire" d="M230,99 L298,99" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="264" y="92" text-anchor="middle">exec</text>
+      <!-- ctl -> socket -->
+      <path class="wire" d="M510,99 L578,99" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="545" y="92" text-anchor="middle">line</text>
+      <!-- socket -> daemon.py -->
+      <path class="wire" d="M685,138 L685,188" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="692" y="152">accept()</text>
+      <!-- physical keyboard -> Hyprland -->
+      <path class="wire-dash" d="M130,190 L130,140" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="138" y="169">key events</text>
+      <!-- keyboard.py -> physical keyboard -->
+      <path class="wire" d="M300,222 L232,222" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="265" y="214" text-anchor="middle">EVIOCGKEY</text>
+      <!-- daemon.py -> Dictator -->
+      <path class="wire" d="M620,268 L620,288 L470,288 L470,308" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="545" y="282" text-anchor="middle">press() release()</text>
+      <!-- Dictator -> keyboard.py -->
+      <path class="wire" d="M340,310 L340,256" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="348" y="278">poll 20ms</text>
+      <!-- Dictator -> dictate() -->
+      <path class="wire" d="M510,352 L578,352" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="545" y="344" text-anchor="middle">release</text>
+      <text class="t-lbl" x="545" y="368" text-anchor="middle">Event</text>
+      <!-- daemon.py -> claude-dictate-start -->
+      <path class="wire" d="M790,222 L988,222" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="908" y="214" text-anchor="middle">ensure_session()</text>
+      <text class="t-lbl" x="908" y="238" text-anchor="middle">--detached, at boot</text>
+      <!-- start -> tmux -->
+      <path class="wire" d="M1065,254 L1065,294" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="1072" y="279">new-session</text>
+      <!-- kitty -> tmux -->
+      <path class="wire-dash" d="M1225,254 L1225,294" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="1232" y="279">attach</text>
+      <!-- dictate() -> transcript.py -->
+      <path class="wire" d="M630,394 L630,438" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="637" y="421">read_state()</text>
+      <!-- dictate() -> session.py (PTT ticks) -->
+      <path class="wire" d="M760,394 L760,568" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="767" y="474">PTT</text>
+      <text class="t-lbl" x="767" y="488">tick</text>
+      <text class="t-lbl" x="767" y="502">30ms</text>
+      <!-- transcript.py -> session.py -->
+      <path class="wire" d="M650,510 L650,568" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="657" y="544">snapshot()</text>
+      <!-- Dictator -> TextTyper -->
+      <path class="wire" d="M405,394 L405,438" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="412" y="421">type_text()</text>
+      <!-- TextTyper -> YdotoolTyper -->
+      <path class="wire-dash" d="M405,504 L405,568" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="412" y="541">implemented by</text>
+      <!-- YdotoolTyper -> ydotoold -->
+      <path class="wire" d="M300,602 L232,602" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="265" y="594" text-anchor="middle">ydotool</text>
+      <!-- ydotoold -> Focused app -->
+      <path class="wire" d="M130,634 L130,698" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="138" y="670">virtual keystrokes</text>
+      <!-- session.py -> Claude (send-keys) -->
+      <path class="wire" d="M790,590 L998,590" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="895" y="582" text-anchor="middle">send-keys -H &lt;hex&gt;</text>
+      <!-- Claude -> session.py (capture-pane) -->
+      <path class="wire" d="M1000,616 L792,616" marker-end="url(#ah)"/>
+      <text class="t-lbl" x="895" y="633" text-anchor="middle">capture-pane -p -e</text>
+      <text class="t-lbl" x="895" y="647" text-anchor="middle">+ cursor position</text>
+    </svg>
+  </div>
+  <div class="legend">
+    <span><i class="sw ours"></i>this repo</span>
+    <span><i class="sw claude"></i>Claude Code inside tmux</span>
+    <span><i class="sw ext"></i>desktop, kernel, or external tool</span>
+    <span><i class="sw dash"></i>interface, optional, or indirect</span>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="timeline">
+  <h2>One dictation, start to finish</h2>
+  <p class="section-intro">
+    The left part (while you speak) is not to scale. Everything after the release line is drawn to scale at
+    about 300 px per second, with <code>t = 0</code> at the moment Space comes up.
+  </p>
+
+  <div class="panel diagram">
+    <svg viewBox="0 0 1200 312" role="img" aria-labelledby="tl-title tl-desc">
+      <title id="tl-title">Dictation timeline</title>
+      <desc id="tl-desc">Four lanes: keyboard, keys injected into tmux, the Claude screen, and output. Before release the push-to-talk sequence is sent every 30ms while words stream in. After release there is a 0.3 second tail, about 0.6 seconds for the last words to land, a 1.0 second stability window, then the transcript is read, the box cleared and the text typed, about 2.0 seconds after release.</desc>
+
+      <!-- lane labels -->
+      <text class="lane-lbl" x="20" y="63">Keyboard</text>
+      <text class="lane-lbl" x="20" y="119">Keys into tmux</text>
+      <text class="lane-lbl" x="20" y="175">Claude screen</text>
+      <text class="lane-lbl" x="20" y="231">Output</text>
+
+      <!-- release guide -->
+      <line class="guide" x1="560" y1="30" x2="560" y2="262"/>
+      <text class="tick-lbl" x="560" y="22" text-anchor="middle" style="fill: var(--accent)">Space released</text>
+
+      <!-- lane 1: keyboard -->
+      <rect class="bar-ext" x="160" y="44" width="400" height="30" rx="4"/>
+      <text class="bar-txt" x="172" y="63">Super+Space physically held (polled every 20ms)</text>
+
+      <!-- lane 2: keys into tmux -->
+      <rect class="bar-ours" x="160" y="100" width="40" height="30" rx="4"/>
+      <text class="bar-txt" x="180" y="119" text-anchor="middle">clear</text>
+      <rect class="bar-ours" x="200" y="100" width="360" height="30" rx="4"/>
+      <text class="bar-code" x="212" y="119">\e[32;6u via send-keys -H, every 30ms</text>
+      <rect class="bar-ours" x="560" y="100" width="90" height="30" rx="4" style="opacity:0.6"/>
+      <text class="bar-txt" x="605" y="119" text-anchor="middle">0.3s tail</text>
+      <rect class="bar-ours" x="1130" y="100" width="18" height="30" rx="3"/>
+      <text class="bar-txt" x="1122" y="119" text-anchor="end">clear</text>
+
+      <!-- lane 3: Claude screen -->
+      <rect class="bar-claude" x="200" y="156" width="48" height="30" rx="4"/>
+      <text class="bar-txt" x="224" y="175" text-anchor="middle">meter</text>
+      <rect class="bar-claude" x="248" y="156" width="402" height="30" rx="4"/>
+      <text class="bar-txt" x="260" y="175">text streams in word by word</text>
+      <rect class="bar-claude" x="650" y="156" width="180" height="30" rx="4" style="opacity:0.75"/>
+      <text class="bar-txt" x="740" y="175" text-anchor="middle">last words land, ~0.6s</text>
+      <rect class="bar-ok" x="830" y="156" width="300" height="30" rx="4"/>
+      <text class="bar-txt" x="980" y="175" text-anchor="middle">meter gone, text unchanged for 1.0s</text>
+
+      <!-- lane 4: output -->
+      <rect class="bar-ours" x="1130" y="212" width="30" height="30" rx="4"/>
+      <text class="bar-txt" x="1122" y="225" text-anchor="end">read, clear, wait for modifiers,</text>
+      <text class="bar-txt" x="1122" y="240" text-anchor="end">normalize to ASCII, ydotool type</text>
+
+      <!-- axis -->
+      <line class="axis" x1="160" y1="274" x2="520" y2="274"/>
+      <path class="zig" d="M520,274 L527,267 L534,281 L541,267 L548,281 L555,274"/>
+      <line class="axis" x1="555" y1="274" x2="1180" y2="274"/>
+      <text class="tick-lbl" x="340" y="296" text-anchor="middle">as long as you speak (60s watchdog)</text>
+      <line class="tick" x1="560" y1="269" x2="560" y2="279"/>
+      <text class="tick-lbl" x="560" y="296" text-anchor="middle">0</text>
+      <line class="tick" x1="650" y1="269" x2="650" y2="279"/>
+      <text class="tick-lbl" x="650" y="296" text-anchor="middle">0.3s</text>
+      <line class="tick" x1="830" y1="269" x2="830" y2="279"/>
+      <text class="tick-lbl" x="830" y="296" text-anchor="middle">~0.9s</text>
+      <line class="tick" x1="1130" y1="269" x2="1130" y2="279"/>
+      <text class="tick-lbl" x="1112" y="296" text-anchor="middle">~1.9s</text>
+      <line class="tick" x1="1160" y1="269" x2="1160" y2="279"/>
+      <text class="tick-lbl" x="1166" y="296" text-anchor="middle">~2.0s</text>
+    </svg>
+  </div>
+
+  <div class="panel table-wrap" style="margin-top:16px">
+    <table class="steps">
+      <thead>
+        <tr><th>#</th><th>Step</th><th>Timing</th><th>Code</th></tr>
+      </thead>
+      <tbody>
+        <tr class="phase"><td colspan="4">Press</td></tr>
+        <tr>
+          <td class="n">1</td>
+          <td>Hyprland runs <code>claude-dictate-ctl press</code>. The Dictator starts a worker thread, a 60s watchdog, and a watcher on the physical Space key. A second press while busy just answers <code>busy</code>.</td>
+          <td class="when">t = press</td>
+          <td class="where">ctl.py, daemon.py, dictator.py</td>
+        </tr>
+        <tr>
+          <td class="n">2</td>
+          <td>Clear the input box: while it is not empty, send <code>End</code> + <code>Ctrl+U</code> (<code>\e[F</code> <code>\x15</code>) and re-read. Each round removes one visual row.</td>
+          <td class="when">80ms per round, max 20</td>
+          <td class="where">transcript.clear_input</td>
+        </tr>
+        <tr>
+          <td class="n">3</td>
+          <td>Hold push-to-talk: a thread sends CSI <code>32;6u</code> (<code>\e[32;6u</code>, ctrl+shift+space) with <code>tmux send-keys -H</code> over and over, so Claude sees key auto-repeat.</td>
+          <td class="when">every 30ms</td>
+          <td class="where">dictation._PushToTalkHold</td>
+        </tr>
+        <tr>
+          <td class="n">4</td>
+          <td>Confirm recording: a level meter glyph (<code>▁▂▃▄▅▆▇█</code>) appears at the end of the input line. If it never shows, raise <code>VoiceNotActive</code> (usually <code>/voice</code> is off).</td>
+          <td class="when">poll 50ms, within 2s</td>
+          <td class="where">dictation._wait_for_recording</td>
+        </tr>
+        <tr>
+          <td class="n">5</td>
+          <td>Speak. Claude streams the text into the input box word by word.</td>
+          <td class="when">while held</td>
+          <td class="where">Claude Code</td>
+        </tr>
+        <tr class="phase"><td colspan="4">Release</td></tr>
+        <tr>
+          <td class="n">6</td>
+          <td>Space is physically released. Whichever comes first wins: the key poll, the Hyprland release bind (<code>claude-dictate-ctl release</code>), or the 60s watchdog.</td>
+          <td class="when">poll 20ms</td>
+          <td class="where">Dictator._watch_hotkey</td>
+        </tr>
+        <tr>
+          <td class="n">7</td>
+          <td>Keep ticking for a short tail so the last syllable is not cut off, then stop the ticks.</td>
+          <td class="when">0.3s</td>
+          <td class="where">RELEASE_TAIL_SECONDS</td>
+        </tr>
+        <tr>
+          <td class="n">8</td>
+          <td>Wait until the meter is gone and the box has not changed for a full quiet window. The last words usually land about 0.6s after the tail.</td>
+          <td class="when">1.0s quiet, 8s cap</td>
+          <td class="where">dictation._wait_for_final_text</td>
+        </tr>
+        <tr>
+          <td class="n">9</td>
+          <td>Read the transcript from the input box, then clear the box again so the session is ready for next time.</td>
+          <td class="when">tens of ms</td>
+          <td class="where">transcript.py</td>
+        </tr>
+        <tr class="phase"><td colspan="4">Type</td></tr>
+        <tr>
+          <td class="n">10</td>
+          <td>Wait until no Ctrl, Shift, Alt or Super key is physically held. If they stay down, give up with <code>ModifiersStillHeld</code> and show the transcript in a notification.</td>
+          <td class="when">poll 20ms, 10s cap</td>
+          <td class="where">Dictator._wait_for_modifiers_released</td>
+        </tr>
+        <tr>
+          <td class="n">11</td>
+          <td>Normalize to ASCII: straighten curly quotes, turn fancy dashes and ellipses into plain ones, strip accents.</td>
+          <td class="when">instant</td>
+          <td class="where">to_typeable_ascii</td>
+        </tr>
+        <tr>
+          <td class="n">12</td>
+          <td>Type it into the focused app with <code>ydotool type --key-hold 2 --key-delay 2</code>.</td>
+          <td class="when">2ms hold, 2ms delay</td>
+          <td class="where">YdotoolTyper.type_text</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="total"><strong>About 2.0s from release to text:</strong> 0.3s tail + ~0.6s for the last words + 1.0s stability window + read, clear and type.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="why">
+  <h2>Why it is built this way</h2>
+  <p class="section-intro">Each of these came out of probing the real Claude Code TUI and the real desktop. None of it is obvious from the outside.</p>
+
+  <div class="findings">
+    <div class="finding">
+      <h3>Raw bytes instead of tmux key names</h3>
+      <p>tmux drops Shift from Ctrl combos, so <code>send-keys C-S-Space</code> reaches Claude as plain ctrl+space. We send the CSI u sequence <code>\e[32;6u</code> as hex with <code>send-keys -H</code> so it arrives intact.</p>
+    </div>
+    <div class="finding">
+      <h3>Holding a key means repeating it</h3>
+      <p>A terminal has no key-up event. Claude decides the push-to-talk key is held from auto-repeat, so we resend the sequence every 30ms for as long as we want to record.</p>
+    </div>
+    <div class="finding">
+      <h3>Clearing is End + Ctrl+U, in a loop</h3>
+      <p>Ctrl+L redraws the screen but leaves the input alone. Ctrl+U only kills the current visual row, so we send End + Ctrl+U and re-read until the box is empty.</p>
+    </div>
+    <div class="finding">
+      <h3>Empty is detected by dim text</h3>
+      <p>An empty box still shows placeholder text after the prompt. The placeholder is drawn dim (SGR 2), so the parser captures with <code>-e</code> and treats a dim run right after <code>❯</code> as empty.</p>
+    </div>
+    <div class="finding">
+      <h3>Release comes from the keyboard itself</h3>
+      <p>Hyprland release binds fired only 2 out of 6 times in testing. The daemon polls the physical key state from <code>/dev/input</code> with the <code>EVIOCGKEY</code> ioctl every 20ms and keeps the release bind only as a backup.</p>
+    </div>
+    <div class="finding">
+      <h3>Typing waits for modifiers</h3>
+      <p>Typing with ydotool while Super was still down produced phantom Super+Space presses and could fire window manager shortcuts. Nothing is typed until every modifier is physically up.</p>
+    </div>
+    <div class="finding">
+      <h3>Plan mode with no tools</h3>
+      <p>The session runs <code>claude --permission-mode plan --tools ""</code>. If a stray Enter ever submits the input box, Claude can only answer in text; it has nothing to run.</p>
+    </div>
+    <div class="finding">
+      <h3>ASCII only on the way out</h3>
+      <p>ydotool presses keys on the current layout, so it cannot type characters outside ASCII. Text is normalized first: accents stripped, curly quotes straightened, fancy dashes made plain.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="files">
+  <h2>File map</h2>
+  <div class="panel table-wrap">
+    <table class="files">
+      <tbody>
+        <tr class="group"><td colspan="2">Entry points</td></tr>
+        <tr><td>bin/claude-dictate-start</td><td>Starts the tmux session running Claude Code (120x30, own socket); opens a kitty window unless <code>--detached</code>.</td></tr>
+        <tr><td>bin/claude-dictated</td><td>Runs the daemon (<code>python3 -m claude_dictate.daemon</code>).</td></tr>
+        <tr><td>bin/claude-dictate-ctl</td><td>Runs the client that Hyprland calls with press, release or status.</td></tr>
+        <tr><td>tmux.conf</td><td>Extended keys in CSI u format, zero escape time, no status bar, and a C-S-Space binding that forwards the raw sequence.</td></tr>
+        <tr><td>~/.config/caelestia/hypr-user.lua</td><td>Outside the repo: binds <code>SUPER + Space</code> to <code>press</code>, plus a release bind to <code>release</code>.</td></tr>
+
+        <tr class="group"><td colspan="2">Daemon and control</td></tr>
+        <tr><td>claude_dictate/ctl.py</td><td>CLI client: sends one command and prints the reply.</td></tr>
+        <tr><td>claude_dictate/ipc.py</td><td>Socket path and the line-based <code>send_command</code> protocol.</td></tr>
+        <tr><td>claude_dictate/daemon.py</td><td>Makes sure the session is up, serves the socket, wires the Dictator to YdotoolTyper and PhysicalKeyboard, reports errors with notify-send.</td></tr>
+        <tr><td>claude_dictate/dictator.py</td><td>Turns press and release into one dictation at a time; watches the hotkey, waits for modifiers, then types.</td></tr>
+        <tr><td>claude_dictate/keyboard.py</td><td>Finds keyboards in <code>/proc/bus/input/devices</code> and reads which keys are held with <code>EVIOCGKEY</code>, without consuming events.</td></tr>
+
+        <tr class="group"><td colspan="2">Claude Code engine</td></tr>
+        <tr><td>claude_dictate/dictation.py</td><td><code>dictate(release)</code>: clear, hold push-to-talk, confirm recording, wait for release and final text, clear again.</td></tr>
+        <tr><td>claude_dictate/transcript.py</td><td>Finds the input box between the two rules, detects the placeholder and the level meter, and returns the text.</td></tr>
+        <tr><td>claude_dictate/session.py</td><td>The only module that calls tmux: <code>send-keys -H</code>, <code>capture-pane -p -e</code>, cursor and pane size.</td></tr>
+
+        <tr class="group"><td colspan="2">Output</td></tr>
+        <tr><td>claude_dictate/typers/base.py</td><td><code>TextTyper</code>: the interface for delivering text to the focused app.</td></tr>
+        <tr><td>claude_dictate/typers/ydotool.py</td><td><code>YdotoolTyper</code> and <code>to_typeable_ascii</code>.</td></tr>
+
+        <tr class="group"><td colspan="2">Support</td></tr>
+        <tr><td>scripts/dictate_once.py</td><td>Runs one dictation from a terminal and prints the transcript.</td></tr>
+        <tr><td>scripts/probe_dictation.py</td><td>Holds push-to-talk for a fixed time and records every distinct pane frame (output in <code>probe-output/</code>).</td></tr>
+        <tr><td>tests/</td><td>Unit tests for the Dictator, the transcript parser and the ydotool typer.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>Generated from the source in this repository. If the code changes, the timings and names here may drift.</footer>
+
+</main>
+</body>
+</html>
