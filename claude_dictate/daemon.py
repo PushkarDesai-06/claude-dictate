@@ -5,9 +5,10 @@ import socket
 import subprocess
 import sys
 import time
+from functools import partial
 from pathlib import Path
 
-from claude_dictate import session
+from claude_dictate import dictation, session, sounds
 from claude_dictate.dictator import Dictator, UnsafeToType
 from claude_dictate.ipc import COMMANDS, SOCKET_PATH, send_command
 from claude_dictate.keyboard import PhysicalKeyboard
@@ -105,7 +106,12 @@ def handle(connection: socket.socket, dictator: Dictator) -> None:
 
 
 def serve(socket_path: Path = SOCKET_PATH) -> None:
-    dictator = Dictator(YdotoolTyper(), PhysicalKeyboard, on_error=report_error)
+    dictate_with_cues = partial(
+        dictation.dictate,
+        on_recording_started=lambda: sounds.play(sounds.RECORDING_STARTED),
+        on_recording_stopped=lambda: sounds.play(sounds.RECORDING_STOPPED),
+    )
+    dictator = Dictator(YdotoolTyper(), PhysicalKeyboard, dictate_with_cues, on_error=report_error)
     server = bind_socket(socket_path)
     log.info("listening on %s", socket_path)
     try:

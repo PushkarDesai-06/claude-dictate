@@ -1,7 +1,15 @@
 import threading
 import time
+from collections.abc import Callable
+from typing import Any
 
 from claude_dictate import session, transcript
+
+Hook = Callable[[], None]
+
+
+def _do_nothing() -> None:
+    pass
 
 TICK_SECONDS = 0.03
 POLL_SECONDS = 0.05
@@ -66,6 +74,8 @@ def dictate(
     release: threading.Event,
     quiet_seconds: float = QUIET_SECONDS,
     release_tail_seconds: float = RELEASE_TAIL_SECONDS,
+    on_recording_started: Hook = _do_nothing,
+    on_recording_stopped: Hook = _do_nothing,
 ) -> str:
     if not session.is_running():
         raise SessionNotRunning("claude-dictate session is not running; run claude-dictate-start")
@@ -73,15 +83,17 @@ def dictate(
     transcript.clear_input()
     with _PushToTalkHold():
         _wait_for_recording(RECORDING_START_TIMEOUT)
+        on_recording_started()
         release.wait()
         time.sleep(release_tail_seconds)
+    on_recording_stopped()
 
     text = _wait_for_final_text(quiet_seconds, FINALIZE_TIMEOUT)
     transcript.clear_input()
     return text
 
 
-def dictate_for(seconds: float, **options: float) -> str:
+def dictate_for(seconds: float, **options: Any) -> str:
     release = threading.Event()
     timer = threading.Timer(seconds, release.set)
     timer.start()
