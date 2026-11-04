@@ -1,4 +1,5 @@
 import time
+from dataclasses import dataclass
 
 from claude_dictate import session
 from claude_dictate.session import ANSI_ESCAPE, Snapshot
@@ -38,7 +39,13 @@ def _strip_prefix(row: str, prefix: str) -> str:
     return row[len(prefix):] if row.startswith(prefix) else row.lstrip()
 
 
-def parse_input_box(styled: str) -> str:
+@dataclass(frozen=True)
+class InputState:
+    text: str
+    recording: bool
+
+
+def _raw_box_text(styled: str) -> str:
     box = _input_box_rows(styled)
     if _shows_placeholder(box[0]):
         return ""
@@ -46,12 +53,25 @@ def parse_input_box(styled: str) -> str:
     plain = [ANSI_ESCAPE.sub("", row).rstrip() for row in box]
     plain[0] = plain[0].split(PROMPT_PREFIX, 1)[1]
     parts = [plain[0]] + [_strip_prefix(row, CONTINUATION_PREFIX) for row in plain[1:]]
-    joined = " ".join(part for part in parts if part)
-    return joined.rstrip(LEVEL_METER_GLYPHS).rstrip()
+    return " ".join(part for part in parts if part)
+
+
+def parse_input_state(styled: str) -> InputState:
+    raw = _raw_box_text(styled)
+    recording = raw.endswith(tuple(LEVEL_METER_GLYPHS))
+    return InputState(raw.rstrip(LEVEL_METER_GLYPHS).rstrip(), recording)
+
+
+def parse_input_box(styled: str) -> str:
+    return parse_input_state(styled).text
+
+
+def read_state(snap: Snapshot | None = None) -> InputState:
+    return parse_input_state((snap or session.snapshot()).styled)
 
 
 def read_input(snap: Snapshot | None = None) -> str:
-    return parse_input_box((snap or session.snapshot()).styled)
+    return read_state(snap).text
 
 
 def get_transcript() -> str:

@@ -1,6 +1,11 @@
 import unittest
 
-from claude_dictate.transcript import InputBoxNotFound, parse_input_box
+from claude_dictate.transcript import (
+    InputBoxNotFound,
+    InputState,
+    parse_input_box,
+    parse_input_state,
+)
 
 RULE = "\x1b[38;5;244m" + "─" * 40
 FOOTER = "\x1b[39m  \x1b[38;5;246m[cryo@arch claude-dictate]\x1b[39m"
@@ -37,6 +42,14 @@ class ParseInputBoxTest(unittest.TestCase):
     def test_recording_with_no_words_yet(self):
         styled = screen("\x1b[39m❯\xa0▆")
         self.assertEqual(parse_input_box(styled), "")
+
+    def test_state_reports_recording_with_meter(self):
+        state = parse_input_state(screen("\x1b[39m❯\xa0Hello there▆"))
+        self.assertEqual(state, InputState("Hello there", recording=True))
+
+    def test_state_reports_idle_without_meter(self):
+        state = parse_input_state(screen("\x1b[39m❯\xa0Hello there."))
+        self.assertEqual(state, InputState("Hello there.", recording=False))
 
     def test_missing_input_box_raises(self):
         with self.assertRaises(InputBoxNotFound):
